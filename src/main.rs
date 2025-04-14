@@ -66,7 +66,7 @@ pub mod file_handling {
 pub mod translate {
     use crate::file_handling;
     use clap::ArgMatches;
-    use reqwest::header::CONTENT_TYPE;
+    use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
     use serde::Serialize;
     use serde_json::Value;
     use std::env;
@@ -112,6 +112,7 @@ pub mod translate {
         if args.get_flag("verbose") {
             eprintln!("sending: {text:?}")
         }
+        let api_key = env::var("B3_API_KEY").unwrap_or("dummy_key".to_string());
         let request = RequestAI {
             model: env::var("B3_MODEL").unwrap(),
             messages: vec![
@@ -155,8 +156,9 @@ fr,Quel est votre nom?"#
         };
         let client = reqwest::blocking::Client::new();
         let response = client
-            .post(env::var("B3_HOST").unwrap() + "/v1/chat/completions")
+            .post(env::var("B3_HOST").unwrap() + "/chat/completions")
             .header(CONTENT_TYPE, "application/json")
+            .header(AUTHORIZATION, format!("Bearer {}", api_key))
             .body(serde_json::to_string(&request).unwrap())
             .send()
             .unwrap();
@@ -171,6 +173,7 @@ fr,Quel est votre nom?"#
         }
     }
     pub fn get_ai_response(response: &str) -> Option<String> {
+        println!("response:\n{response}");
         let json: Value = serde_json::from_str(response).unwrap();
         let message = &json
             .get("choices")?
