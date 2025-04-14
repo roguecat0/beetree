@@ -173,7 +173,6 @@ fr,Quel est votre nom?"#
         }
     }
     pub fn get_ai_response(response: &str) -> Option<String> {
-        println!("response:\n{response}");
         let json: Value = serde_json::from_str(response).unwrap();
         let message = &json
             .get("choices")?
