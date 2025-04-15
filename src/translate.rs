@@ -1,9 +1,7 @@
 use crate::file_handling;
-use clap::ArgMatches;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Serialize;
 use serde_json::Value;
-use std::env;
 
 enum Role {
     User,
@@ -30,12 +28,22 @@ struct RequestAI {
     messages: Vec<Message>,
 }
 
-pub fn translate(args: &ArgMatches) {
-    let text = if let Some(text) = args.get_one::<String>("text") {
+pub struct Config {
+    pub host: String,
+    pub api_key: String,
+    pub model: String,
+    pub text: Option<String>,
+    pub input_file: Option<String>,
+    pub output_file: Option<String>,
+    pub verbose: bool,
+}
+
+pub fn run(config: Config) {
+    let text = if let Some(text) = config.text {
         text.to_string()
     } else {
-        let path = args.get_one::<String>("input_file").unwrap();
-        match file_handling::read_from_file(path) {
+        let path = config.input_file.unwrap();
+        match file_handling::read_from_file(&path) {
             Ok(text) => text,
             Err(e) => {
                 eprintln!("{e}: could not read {path}");
@@ -43,12 +51,12 @@ pub fn translate(args: &ArgMatches) {
             }
         }
     };
-    if args.get_flag("verbose") {
+    if config.verbose {
         eprintln!("sending: {text:?}")
     }
-    let api_key = env::var("B3_API_KEY").unwrap_or("dummy_key".to_string());
+    let api_key = config.api_key;
     let request = RequestAI {
-            model: env::var("B3_MODEL").unwrap(),
+            model: config.model,
             messages: vec![
                 Message {
                     role: Role::System.into(),
@@ -90,7 +98,7 @@ fr,Quel est votre nom?"#
         };
     let client = reqwest::blocking::Client::new();
     let response = client
-        .post(env::var("B3_HOST").unwrap() + "/chat/completions")
+        .post(config.host + "/chat/completions")
         .header(CONTENT_TYPE, "application/json")
         .header(AUTHORIZATION, format!("Bearer {}", api_key))
         .body(serde_json::to_string(&request).unwrap())
@@ -98,8 +106,8 @@ fr,Quel est votre nom?"#
         .unwrap();
     let body = response.text().unwrap();
     let ai_response = get_ai_response(&body).unwrap();
-    if let Some(output_file) = args.get_one::<String>("output_file") {
-        if let Err(e) = file_handling::write_to_file(output_file, &ai_response) {
+    if let Some(output_file) = config.output_file {
+        if let Err(e) = file_handling::write_to_file(&output_file, &ai_response) {
             eprintln!("{e}: couldn't write to {output_file}")
         }
     } else {
