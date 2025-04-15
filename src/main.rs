@@ -41,6 +41,7 @@ fn build_translate_command() -> Command {
 fn build_lang_command() -> Command {
     Command::new("lang")
         .about("transfers language translations to their respective files")
+        .arg(Arg::new("new_var").help("the variable name the language tags will get"))
         .arg(Arg::new("text").help("text to be transfered"))
         .arg(
             Arg::new("input_file")
@@ -106,8 +107,9 @@ impl ToConfig<lang::Config> for ArgMatches {
             text: self.get_one::<String>("text").cloned(),
             input_file: self.get_one::<String>("input_file").cloned(),
             append_file: self.get_one::<String>("append_file").cloned(),
-            base_path: self.get_one::<String>("base_path").cloned(),
+            base_path: self.get_one::<String>("base_path").unwrap().to_string(),
             find_var: self.get_one::<String>("find_var").cloned(),
+            new_var: self.get_one::<String>("new_var").cloned().unwrap(),
             verbose: self.get_flag("verbose"),
         })
     }
