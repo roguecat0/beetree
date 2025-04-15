@@ -1,7 +1,20 @@
-use crate::file_handling;
+use crate::{file_handling, Input};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Serialize;
 use serde_json::Value;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error(transparent)]
+    FileError(#[from] file_handling::Error),
+    #[error("invalid ai response: {0}")]
+    AiResponse(String),
+    #[error(transparent)]
+    Reqwest(#[from] reqwest::Error),
+    #[error(transparent)]
+    Serde(#[from] serde_json::Error),
+}
 
 enum Role {
     User,
@@ -32,24 +45,15 @@ pub struct Config {
     pub host: String,
     pub api_key: String,
     pub model: String,
-    pub text: Option<String>,
-    pub input_file: Option<String>,
+    pub input: Input,
     pub output_file: Option<String>,
     pub verbose: bool,
 }
 
-pub fn run(config: Config) {
-    let text = if let Some(text) = config.text {
-        text.to_string()
-    } else {
-        let path = config.input_file.unwrap();
-        match file_handling::read_from_file(&path) {
-            Ok(text) => text,
-            Err(e) => {
-                eprintln!("{e}: could not read {path}");
-                return;
-            }
-        }
+pub fn run(config: Config) -> Result<(), Error> {
+    let text = match config.input {
+        Input::File(path) => file_handling::read_from_file(&path)?,
+        Input::Text(text) => text,
     };
     if config.verbose {
         eprintln!("sending: {text:?}")
@@ -101,26 +105,21 @@ fr,Quel est votre nom?"#
         .post(config.host + "/chat/completions")
         .header(CONTENT_TYPE, "application/json")
         .header(AUTHORIZATION, format!("Bearer {}", api_key))
-        .body(serde_json::to_string(&request).unwrap())
-        .send()
-        .unwrap();
-    let body = response.text().unwrap();
-    let ai_response = get_ai_response(&body).unwrap();
+        .body(serde_json::to_string(&request)?)
+        .send()?;
+    let body = response.text()?;
+    let ai_response = get_ai_response(&body)?;
     if let Some(output_file) = config.output_file {
-        if let Err(e) = file_handling::write_to_file(&output_file, &ai_response) {
-            eprintln!("{e}: couldn't write to {output_file}")
-        }
+        file_handling::write_to_file(&output_file, &ai_response)?;
     } else {
         println!("{ai_response}");
     }
+    Ok(())
 }
-pub fn get_ai_response(response: &str) -> Option<String> {
-    let json: Value = serde_json::from_str(response).unwrap();
-    let message = &json
-        .get("choices")?
-        .get(0)?
-        .get("message")?
-        .get("content")?
-        .as_str()?;
-    Some(message.to_string())
+pub fn get_ai_response(response: &str) -> Result<String, Error> {
+    let json: Value = serde_json::from_str(response)?;
+    let message = json["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or(Error::AiResponse(response.to_owned()))?;
+    Ok(message.to_string())
 }

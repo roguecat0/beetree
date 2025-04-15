@@ -1,7 +1,10 @@
+use anyhow::bail;
+use anyhow::Context;
 use beetree::lang;
 use beetree::translate;
 use clap::{command, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use std::env;
+use std::path::PathBuf;
 
 fn build_args_tree() -> ArgMatches {
     command!()
@@ -80,21 +83,25 @@ fn build_lang_command() -> Command {
         )
 }
 impl ToConfig<translate::Config> for ArgMatches {
-    type Error = &'static str;
+    type Error = anyhow::Error;
     fn to_config(&self) -> Result<translate::Config, Self::Error> {
         let api_key = env::var("B3_API_KEY").unwrap_or(String::from("dummy_key"));
-        let model = env::var("B3_MODEL").map_err(|_| "no B3_MODEL env variable")?;
-        let host = env::var("B3_HOST").map_err(|_| "no host env variable")?;
-        let text = self.get_one::<String>("text").cloned();
-        let input_file = self.get_one::<String>("input_file").cloned();
+        let model = env::var("B3_MODEL").with_context(|| "No B3_MODEL")?;
+        let host = env::var("B3_HOST").with_context(|| "no B3_HOST")?;
         let output_file = self.get_one::<String>("output_file").cloned();
+        let input = if let Some(text) = self.get_one::<String>("text") {
+            beetree::Input::Text(text.to_string())
+        } else {
+            let file = self.get_one::<String>("input_file").expect("clap handles");
+            let file = PathBuf::from(file);
+            beetree::Input::File(file)
+        };
         let verbose = self.get_flag("verbose");
         Ok(translate::Config {
             api_key,
             model,
             host,
-            text,
-            input_file,
+            input,
             output_file,
             verbose,
         })
@@ -107,9 +114,15 @@ impl ToConfig<lang::Config> for ArgMatches {
             text: self.get_one::<String>("text").cloned(),
             input_file: self.get_one::<String>("input_file").cloned(),
             append_file: self.get_one::<String>("append_file").cloned(),
-            base_path: self.get_one::<String>("base_path").unwrap().to_string(),
             find_var: self.get_one::<String>("find_var").cloned(),
-            new_var: self.get_one::<String>("new_var").cloned().unwrap(),
+            base_path: self
+                .get_one::<String>("base_path")
+                .cloned()
+                .expect("guaranteed by clap"),
+            new_var: self
+                .get_one::<String>("new_var")
+                .cloned()
+                .expect("guaranteed by clap"),
             verbose: self.get_flag("verbose"),
         })
     }
@@ -119,36 +132,23 @@ trait ToConfig<T> {
     fn to_config(&self) -> Result<T, Self::Error>;
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     // todo: change to warning message in verbose
     let matches = build_args_tree();
-    if let Err(_) = dotenvy::dotenv() {
-        return;
+    if let (Err(_), true) = (dotenvy::dotenv(), matches.get_flag("verbose")) {
+        eprintln!("no .env file found");
     }
     match matches.subcommand() {
         Some(("translate", args)) => {
-            let config = match args.to_config() {
-                Ok(config) => config,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    return;
-                }
-            };
-            translate::run(config);
+            let config = args.to_config()?;
+            translate::run(config)?;
         }
         Some(("lang", args)) => {
-            let config = match args.to_config() {
-                Ok(config) => config,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    return;
-                }
-            };
-            if let Err(e) = lang::run(config) {
-                eprintln!("error: {e}");
-            }
+            let config = args.to_config().map_err(|_e| anyhow::anyhow!("lol"))?;
+            lang::run(config).map_err(|_e| anyhow::anyhow!("lol"))?;
         }
         Some(subcommand) => println!("{subcommand:?}"),
         None => {}
     }
+    Ok(())
 }
