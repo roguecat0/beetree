@@ -1,6 +1,6 @@
-use anyhow::bail;
 use anyhow::Context;
 use beetree::lang;
+use beetree::lang::{Action, FindSpecified};
 use beetree::translate;
 use clap::{command, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use std::env;
@@ -42,9 +42,14 @@ fn build_translate_command() -> Command {
         )
 }
 fn build_lang_command() -> Command {
+    let group = ArgGroup::new("actions").args(["prepend_var"]);
     Command::new("lang")
         .about("transfers language translations to their respective files")
-        .arg(Arg::new("new_var").help("the variable name the language tags will get"))
+        .arg(
+            Arg::new("new_var")
+                .help("the variable name the language tags will get")
+                .required(true),
+        )
         .arg(Arg::new("text").help("text to be transfered"))
         .arg(
             Arg::new("input_file")
@@ -60,22 +65,19 @@ fn build_lang_command() -> Command {
                 .help("path to branching language directory"),
         )
         .arg(
-            Arg::new("append_file")
-                .short('a')
-                .long("append")
-                .help("path to file (per language) to append translations to"),
+            Arg::new("search_file")
+                .short('f')
+                .long("file")
+                .required_unless_present_any(group.get_args())
+                .help("path to file (per language) to specify seach.\nwill append to this file if no actions flags included"),
         )
         .arg(
-            Arg::new("find_var")
-                .short('f')
-                .long("find")
-                .help("variable name that will be scanned.\nthe translations will be inserted the line before the var"),
+            Arg::new("prepend_var")
+                .short('p')
+                .long("prepend")
+                .help("the translations will be inserted the line before the variable"),
         )
-        .group(
-            ArgGroup::new("search_type")
-                .required(true)
-                .args(["append_file", "find_var"]),
-        )
+        .group(group)
         .group(
             ArgGroup::new("inputs")
                 .required(true)
@@ -110,15 +112,23 @@ impl ToConfig<translate::Config> for ArgMatches {
 impl ToConfig<lang::Config> for ArgMatches {
     type Error = &'static str;
     fn to_config(&self) -> Result<lang::Config, Self::Error> {
+        let search_file = self.get_one::<String>("search_file").map(|s| s.into());
+        let action = if let Some(needle) = self.get_one::<String>("prepend_var") {
+            Action::PrependFile(FindSpecified {
+                needle: needle.to_string(),
+                file: search_file,
+            })
+        } else {
+            Action::Append(search_file.expect("guaranteed by clap"))
+        };
         Ok(lang::Config {
             text: self.get_one::<String>("text").cloned(),
-            input_file: self.get_one::<String>("input_file").cloned(),
-            append_file: self.get_one::<String>("append_file").cloned(),
-            find_var: self.get_one::<String>("find_var").cloned(),
+            input_file: self.get_one::<String>("input_file").map(|s| s.into()),
+            action,
             base_path: self
                 .get_one::<String>("base_path")
-                .cloned()
-                .expect("guaranteed by clap"),
+                .expect("guaranteed by clap")
+                .into(),
             new_var: self
                 .get_one::<String>("new_var")
                 .cloned()
@@ -133,7 +143,6 @@ trait ToConfig<T> {
 }
 
 fn main() -> anyhow::Result<()> {
-    // todo: change to warning message in verbose
     let matches = build_args_tree();
     if let (Err(_), true) = (dotenvy::dotenv(), matches.get_flag("verbose")) {
         eprintln!("no .env file found");
@@ -144,8 +153,10 @@ fn main() -> anyhow::Result<()> {
             translate::run(config)?;
         }
         Some(("lang", args)) => {
-            let config = args.to_config().map_err(|_e| anyhow::anyhow!("lol"))?;
-            lang::run(config).map_err(|_e| anyhow::anyhow!("lol"))?;
+            let config: lang::Config = args
+                .to_config()
+                .map_err(|e| anyhow::anyhow!("error: {e}"))?;
+            lang::run(config).map_err(|e| anyhow::anyhow!("error: {e}"))?;
         }
         Some(subcommand) => println!("{subcommand:?}"),
         None => {}

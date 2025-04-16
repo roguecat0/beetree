@@ -6,16 +6,28 @@ use std::path::{Path, PathBuf};
 #[derive(Debug)]
 pub struct Config {
     pub verbose: bool,
-    pub base_path: String,
+    pub base_path: PathBuf,
     pub text: Option<String>,
-    pub input_file: Option<String>,
-    pub append_file: Option<String>,
-    pub find_var: Option<String>,
+    pub input_file: Option<PathBuf>,
+    pub action: Action,
     pub new_var: String,
 }
+#[derive(Debug)]
+pub struct FindSpecified {
+    pub needle: String,
+    pub file: Option<PathBuf>,
+}
+#[derive(Debug)]
+pub enum Action {
+    Append(PathBuf),
+    PrependFile(FindSpecified),
+}
 type MyError = &'static str;
+// todo: add replace (one line support)
+// todo: add specify option
+// todo: add remove (one line support)
 pub fn run(config: Config) -> Result<(), MyError> {
-    let config = dbg!(config);
+    let config = if config.verbose { dbg!(config) } else { config };
     let text = if let Some(text) = config.text {
         Ok(text)
     } else {
@@ -28,53 +40,60 @@ pub fn run(config: Config) -> Result<(), MyError> {
         .map(|(lang, _)| lang.to_string())
         .collect();
 
-    if let Some(append_file) = config.append_file {
-        let append_paths: Vec<_> = langs
-            .iter()
-            .map(|lang| {
-                (
-                    lang.to_string(),
-                    canonicalize(PathBuf::from_iter([&config.base_path, lang, &append_file])).ok(),
-                )
-            })
-            .collect();
-        let path_per_lang = language_base_find_file(config.base_path, &langs, &|path, lang| {
-            let Some(append_path) = find_match(lang, &append_paths) else {
-                panic!("how even?")
-            };
-            if canonicalize(path).ok().as_ref() == append_path.as_ref() {
-                Some(path.to_owned())
-            } else {
-                None
+    match config.action {
+        Action::Append(file) => {
+            let append_paths: Vec<_> = langs
+                .iter()
+                .map(|lang| {
+                    (
+                        lang.to_string(),
+                        canonicalize(PathBuf::from_iter([
+                            &config.base_path,
+                            Path::new(lang),
+                            &file,
+                        ]))
+                        .ok(),
+                    )
+                })
+                .collect();
+            let path_per_lang = language_base_find_file(config.base_path, &langs, &|path, lang| {
+                let Some(append_path) = find_match(lang, &append_paths) else {
+                    panic!("how even?")
+                };
+                if canonicalize(path).ok().as_ref() == append_path.as_ref() {
+                    Some(path.to_owned())
+                } else {
+                    None
+                }
+            });
+            for (lang, buff) in path_per_lang
+                .into_iter()
+                .map(|(lang, buff)| (lang, buff.ok_or("path not found for lang: l")))
+            {
+                let p = buff?;
+                let replacement_text =
+                    find_match(&lang, &language_texts).ok_or("no match in language texts...")?;
+                append_to_file(&p, replacement_text).map_err(|_| "failed to append to file")?;
             }
-        });
-        for (lang, buff) in path_per_lang
-            .into_iter()
-            .map(|(lang, buff)| (lang, buff.ok_or("path not found for lang: l")))
-        {
-            let p = buff?;
-            let replacement_text =
-                find_match(&lang, &language_texts).ok_or("no match in language texts...")?;
-            append_to_file(&p, replacement_text).map_err(|_| "failed to append to file")?;
         }
-    } else if let Some(find_var) = config.find_var {
-        let path_per_lang = language_base_find_file(config.base_path, &langs, &|path, _| {
-            find_line_occurance_in_file(path, &find_var).map(|n| (path.to_owned(), n))
-        });
+        Action::PrependFile(FindSpecified { needle, .. }) => {
+            let path_per_lang = language_base_find_file(config.base_path, &langs, &|path, _| {
+                find_line_occurance_in_file(path, &needle).map(|n| (path.to_owned(), n))
+            });
 
-        for (lang, buff) in path_per_lang
-            .into_iter()
-            .map(|(lang, buff)| (lang, buff.ok_or("path not found for lang: l")))
-        {
-            let (p, index) = buff?;
-            let replacement_text =
-                find_match(&lang, &language_texts).ok_or("no match in language texts...")?;
+            for (lang, buff) in path_per_lang
+                .into_iter()
+                .map(|(lang, buff)| (lang, buff.ok_or("path not found for lang: l")))
+            {
+                let (p, index) = buff?;
+                let replacement_text =
+                    find_match(&lang, &language_texts).ok_or("no match in language texts...")?;
 
-            insert_file_at_line(p, replacement_text, index)
-                .map_err(|_| "failed to append to file")?;
+                insert_file_at_line(p, replacement_text, index)
+                    .map_err(|_| "failed to append to file")?;
+            }
         }
     }
-
     Ok(())
 }
 pub fn find_line_occurance_in_file(path: impl AsRef<Path>, variable: &str) -> Option<usize> {
