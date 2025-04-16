@@ -2,3 +2,4 @@
 .env
 /lang
 /util
+Cargo.lock
