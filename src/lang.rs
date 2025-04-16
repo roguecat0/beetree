@@ -21,6 +21,7 @@ pub struct FindSpecified {
 pub enum Action {
     Append(PathBuf),
     PrependFile(FindSpecified),
+    Delete(FindSpecified),
 }
 type MyError = &'static str;
 // todo: add replace (one line support)
@@ -93,6 +94,19 @@ pub fn run(config: Config) -> Result<(), MyError> {
                     .map_err(|_| "failed to append to file")?;
             }
         }
+        Action::Delete(FindSpecified { needle, .. }) => {
+            let path_per_lang = language_base_find_file(config.base_path, &langs, &|path, _| {
+                find_line_occurance_in_file(path, &needle).map(|n| (path.to_owned(), n))
+            });
+
+            for (_, buff) in path_per_lang
+                .into_iter()
+                .map(|(lang, buff)| (lang, buff.ok_or("path not found for lang: l")))
+            {
+                let (p, index) = buff?;
+                delete_line(p, index).map_err(|_| "failed to append to file")?;
+            }
+        }
     }
     Ok(())
 }
@@ -128,7 +142,9 @@ fn append_to_file(path: impl AsRef<Path>, value: &str) -> io::Result<()> {
 }
 fn insert_file_at_line(path: impl AsRef<Path>, value: &str, index: usize) -> io::Result<()> {
     let s: String = fs::read_to_string(&path)?;
-    let s = if index == 0 {
+    let s = if s.len() == 0 {
+        value.to_string()
+    } else if index == 0 {
         value.to_owned() + "\n" + &s
     } else {
         s.lines()
@@ -143,6 +159,17 @@ fn insert_file_at_line(path: impl AsRef<Path>, value: &str, index: usize) -> io:
             .collect::<Vec<String>>()
             .join("\n")
     };
+    fs::write(&path, &s)?;
+    Ok(())
+}
+fn delete_line(path: impl AsRef<Path>, index: usize) -> io::Result<()> {
+    let s: String = fs::read_to_string(&path)?;
+    let s = s
+        .lines()
+        .enumerate()
+        .filter_map(|(i, l)| (i != index).then(|| l.to_string()))
+        .collect::<Vec<String>>()
+        .join("\n");
     fs::write(&path, &s)?;
     Ok(())
 }

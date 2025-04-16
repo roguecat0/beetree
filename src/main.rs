@@ -1,13 +1,15 @@
-use anyhow::Context;
+use anyhow::{bail, Context};
 use beetree::lang;
 use beetree::lang::{Action, FindSpecified};
 use beetree::translate;
-use clap::{command, Arg, ArgAction, ArgGroup, ArgMatches, Command};
+use clap::{command, value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use std::env;
 use std::path::PathBuf;
 
 fn build_args_tree() -> ArgMatches {
     command!()
+        .arg_required_else_help(true)
+        .subcommand_required(true)
         .subcommand(build_translate_command())
         .subcommand(build_lang_command())
         .arg(
@@ -15,7 +17,8 @@ fn build_args_tree() -> ArgMatches {
                 .short('v')
                 .long("verbose")
                 .global(true)
-                .action(ArgAction::SetTrue),
+                .action(ArgAction::SetTrue)
+                .help("verbose mode"),
         )
         .get_matches()
 }
@@ -43,34 +46,35 @@ fn build_translate_command() -> Command {
 }
 fn build_lang_command() -> Command {
     let group = ArgGroup::new("actions").args(["prepend_var"]);
-    Command::new("lang")
-        .about("transfers language translations to their respective files")
-        .arg(
-            Arg::new("new_var")
-                .help("the variable name the language tags will get")
-                .required(true),
-        )
-        .arg(Arg::new("text").help("text to be transfered"))
-        .arg(
-            Arg::new("input_file")
+    let new_var = Arg::new("new_var")
+                .help("the variable name the language tags will get");
+    let old_var = Arg::new("old_var")
+                .help("variable to be searched for");
+    let input_file = Arg::new("input_file")
                 .short('i')
                 .long("input")
-                .help("path to input file"),
-        )
-        .arg(
-            Arg::new("base_path")
-                .required(true)
-                .short('b')
-                .long("base_path")
-                .help("path to branching language directory"),
-        )
-        .arg(
-            Arg::new("search_file")
+                .help("path to input file");
+    let search_file = Arg::new("search_file")
                 .short('f')
                 .long("file")
-                .required_unless_present_any(group.get_args())
-                .help("path to file (per language) to specify seach.\nwill append to this file if no actions flags included"),
+                .help("path to file (per language) to specify seach.\nwill append to this file if no actions flags included");
+
+    Command::new("lang")
+        .about("transfers language translations to their respective files")
+        .subcommand_negates_reqs(true)
+        .arg(
+            Arg::new("base_path")
+                .short('b')
+                .long("base_path")
+                .default_value(".")
+                .global(true)
+                .value_parser(value_parser!(PathBuf))
+                .help("path to branching language directory"),
+                
         )
+        .arg(&new_var)
+        .arg(input_file)
+        .arg(&search_file)
         .arg(
             Arg::new("prepend_var")
                 .short('p')
@@ -78,10 +82,11 @@ fn build_lang_command() -> Command {
                 .help("the translations will be inserted the line before the variable"),
         )
         .group(group)
-        .group(
-            ArgGroup::new("inputs")
-                .required(true)
-                .args(["text", "input_file"]),
+        .subcommand(Command::new("remove")
+            .about("deletes the variable of the file it appears in\nonly one line variables supported\nonly deletes first appearance")
+            .arg(&search_file)
+            .arg(Arg::new("languages").required(true).help("comma separated list of the languages the file are split into"))
+            .arg(old_var.clone().required(true))
         )
 }
 impl ToConfig<translate::Config> for ArgMatches {
@@ -153,13 +158,22 @@ fn main() -> anyhow::Result<()> {
             translate::run(config)?;
         }
         Some(("lang", args)) => {
-            let config: lang::Config = args
-                .to_config()
-                .map_err(|e| anyhow::anyhow!("error: {e}"))?;
+            println!("args: {args:?}");
+            bail!("end");
+            let config = if let Some((_,subargs)) = args.subcommand() {
+                subargs
+                    .to_config()
+                    .map_err(|e| anyhow::anyhow!("error: {e}"))?
+            } else {
+                args
+                    .to_config()
+                    .map_err(|e| anyhow::anyhow!("error: {e}"))?
+            };
             lang::run(config).map_err(|e| anyhow::anyhow!("error: {e}"))?;
         }
-        Some(subcommand) => println!("{subcommand:?}"),
+        Some(subcommand) => println!("sub command: {subcommand:?} not supported"),
         None => {}
     }
     Ok(())
 }
+
