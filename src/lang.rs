@@ -1,4 +1,5 @@
-use crate::file_handling;
+use crate::{file_handling, Input};
+use std::arch::x86_64::_MM_FROUND_NINT;
 use std::fs::{self, canonicalize};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -39,6 +40,14 @@ pub struct RemoveConfig {
     pub languages: String,
     pub yes: bool,
 }
+#[derive(Debug)]
+pub struct AppendConfig {
+    pub verbose: bool,
+    pub base_path: PathBuf,
+    pub file: PathBuf,
+    pub input: Input,
+    pub src_tag: String,
+}
 #[derive(Error, Debug)]
 pub enum Error {
     #[error(transparent)]
@@ -58,6 +67,8 @@ pub enum Error {
         file: Option<PathBuf>,
         language: String,
     },
+    #[error("something")]
+    NoSeparator,
 }
 type MyError = &'static str;
 // todo: add replace (one line support)
@@ -70,7 +81,7 @@ pub fn run(config: Config) -> Result<(), MyError> {
         let file = config.input_file.unwrap();
         file_handling::read_from_file(file).map_err(|_| "something whent wrong reading input file")
     }?;
-    let language_texts = gen_language_text(&text, &config.new_var)?;
+    let language_texts = gen_language_text(&text, &config.new_var).map_err(|_| "lol")?;
     let langs: Vec<String> = language_texts
         .iter()
         .map(|(lang, _)| lang.to_string())
@@ -152,13 +163,11 @@ pub fn find_line_occurance_in_file(path: impl AsRef<Path>, variable: &str) -> Op
 pub fn find_match<'a, T>(lang: &str, values: &'a [(String, T)]) -> Option<&'a T> {
     values.iter().find(|(l, _)| l == lang).map(|(_, t)| t)
 }
-pub fn process_language_text(line: &str, var_name: &str) -> Result<(String, String), MyError> {
-    let (lang, text) = line
-        .split_once(',')
-        .ok_or("no ',' separator between lang and text")?;
+pub fn process_language_text(line: &str, var_name: &str) -> Result<(String, String), Error> {
+    let (lang, text) = line.split_once(',').ok_or(Error::NoSeparator)?;
     Ok((lang.to_string(), format!("{var_name}={text:?}")))
 }
-pub fn gen_language_text(text: &str, var_name: &str) -> Result<Vec<(String, String)>, MyError> {
+pub fn gen_language_text(text: &str, var_name: &str) -> Result<Vec<(String, String)>, Error> {
     text.lines()
         .map(|line| process_language_text(line, var_name))
         .collect()
@@ -230,7 +239,7 @@ where
 
 fn general_find(
     base: impl AsRef<Path>,
-    langs: &[String],
+    langs: &[&str],
     file: Option<&Path>,
     tag: Option<&str>,
 ) -> Vec<(String, Result<FileSearchResult, Error>)> {
@@ -267,11 +276,31 @@ fn general_find(
                     base,
                     tag: tag.map(ToOwned::to_owned),
                     file: file.map(ToOwned::to_owned),
-                    language: lang.to_owned(),
+                    language: lang.to_string(),
                 }),
             )
         })
         .collect()
+}
+pub fn append(config: AppendConfig) -> Result<(), Error> {
+    if config.verbose {
+        dbg!(&config);
+    }
+    // (extract text)
+    let text = match config.input {
+        Input::Text(text) => text,
+        Input::File(file) => file_handling::read_from_file(&file)?,
+    };
+    // extract language texts
+    let language_texts = gen_language_text(&text, &config.src_tag)?;
+
+    // extract languages
+    let sup = language_texts.iter().unzip();
+
+    //// find general (file and / or needle)
+    //let path_per_lang = general_find(config.base_path, &languages, None, Some(&config.tag.needle));
+
+    Ok(())
 }
 
 pub fn remove(config: RemoveConfig) -> Result<(), Error> {
@@ -279,7 +308,7 @@ pub fn remove(config: RemoveConfig) -> Result<(), Error> {
         dbg!(&config);
     }
     // extract languages
-    let languages: Vec<String> = config.languages.split(",").map(|s| s.to_owned()).collect();
+    let languages: Vec<&str> = config.languages.split(",").collect();
 
     // find general (file and / or needle)
     let path_per_lang = general_find(config.base_path, &languages, None, Some(&config.tag.needle));
@@ -302,6 +331,8 @@ pub fn remove(config: RemoveConfig) -> Result<(), Error> {
     Ok(())
 }
 // general flow
+// (extract text)
+// (extract language texts)
 // extract languages
 // find file
 // find needle
