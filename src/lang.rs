@@ -1,5 +1,4 @@
 use crate::{file_handling, Input};
-use std::arch::x86_64::_MM_FROUND_NINT;
 use std::fs::{self, canonicalize};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -36,7 +35,7 @@ pub enum Action {
 pub struct RemoveConfig {
     pub verbose: bool,
     pub base_path: PathBuf,
-    pub tag: FindSpecified,
+    pub dst_tag: FindSpecified,
     pub languages: String,
     pub yes: bool,
 }
@@ -47,6 +46,14 @@ pub struct AppendConfig {
     pub file: PathBuf,
     pub input: Input,
     pub src_tag: String,
+}
+#[derive(Debug)]
+pub struct InsertConfig {
+    pub verbose: bool,
+    pub base_path: PathBuf,
+    pub input: Input,
+    pub src_tag: String,
+    pub dst_tag: FindSpecified,
 }
 #[derive(Error, Debug)]
 pub enum Error {
@@ -341,8 +348,8 @@ pub fn remove(config: RemoveConfig) -> Result<(), Error> {
     let path_per_lang = general_find(
         config.base_path,
         &languages,
-        config.tag.file.as_deref(),
-        Some(&config.tag.needle),
+        config.dst_tag.file.as_deref(),
+        Some(&config.dst_tag.needle),
     );
 
     // additional post processing
@@ -359,6 +366,49 @@ pub fn remove(config: RemoveConfig) -> Result<(), Error> {
         }
 
         delete_line(&search_find.file, index)?
+    }
+    Ok(())
+}
+pub fn insert(config: InsertConfig) -> Result<(), Error> {
+    if config.verbose {
+        dbg!(&config);
+    }
+    // (extract text)
+    let text = match config.input {
+        Input::Text(text) => text,
+        Input::File(file) => file_handling::read_from_file(&file)?,
+    };
+    // extract language texts
+    let language_texts = gen_language_text(&text, &config.src_tag)?;
+
+    // extract languages
+    let languages: Vec<&str> = language_texts
+        .iter()
+        .map(|(lang, _)| lang.as_ref())
+        .collect();
+
+    // find general (file and / or needle)
+    let path_per_lang = general_find(
+        config.base_path,
+        &languages,
+        config.dst_tag.file.as_deref(),
+        Some(&config.dst_tag.needle),
+    );
+
+    // additional post processing
+    let path_per_lang = path_per_lang
+        .into_iter()
+        .map(|(lang, result)| Ok((lang, result?)))
+        .collect::<Result<Vec<(String, FileSearchResult)>, Error>>()?;
+
+    // action appand
+    for (lang, search_find) in path_per_lang {
+        let index = search_find.line.expect("general_find with needle");
+        if config.verbose {
+            eprintln!("appending to file: {:?}", &search_find.file);
+        }
+        let replacement_text = find_match(&lang, &language_texts).ok_or(Error::LangNoFound)?;
+        insert_file_at_line(&search_find.file, replacement_text, index)?;
     }
     Ok(())
 }
