@@ -10,8 +10,8 @@ mod config_parse;
 
 fn cli() -> Command {
     command!()
-        .arg_required_else_help(true)
         .about("general utily cli for working on the beetree webapplication\nreads .env files")
+        .arg_required_else_help(true)
         .subcommand_required(true)
         .subcommand(build_translate_command())
         .subcommand(build_lang_command())
@@ -24,6 +24,8 @@ fn cli() -> Command {
 fn build_translate_command() -> Command {
     Command::new("translate")
         .about("translates input to (en,nl,fr)\n")
+        .arg_required_else_help(true)
+        .subcommand_required(true)
         .arg(
             arg!([text] "text to be tranlated\nadd '-' when passing through stdin")
                 .required_unless_present("input_file"),
@@ -72,9 +74,11 @@ fn build_lang_command() -> Command {
 
     Command::new("lang")
         .about("transfers language translations to their respective files")
-        .subcommand_negates_reqs(true)
+        .arg_required_else_help(true)
+        .subcommand_required(true)
         .arg(
             arg!(base_path: --"base" <DIR> "path to branching language directory")
+                .env("B3_BASE_PATH")
                 .default_value(".")
                 .global(true)
                 .value_parser(value_parser!(PathBuf))
