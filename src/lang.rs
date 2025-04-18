@@ -69,6 +69,8 @@ pub enum Error {
     },
     #[error("something")]
     NoSeparator,
+    #[error("something else")]
+    LangNoFound,
 }
 type MyError = &'static str;
 // todo: add replace (one line support)
@@ -180,7 +182,12 @@ fn find_line_occurance(text: &str, variable: &str) -> Option<usize> {
 
 fn append_to_file(path: impl AsRef<Path>, value: &str) -> io::Result<()> {
     let s: String = fs::read_to_string(&path)?;
-    let s = s + "\n" + value;
+    let inter = if s == "" || s.ends_with("\n") {
+        ""
+    } else {
+        "\n"
+    };
+    let s = s + inter + value;
     fs::write(&path, &s)?;
     Ok(())
 }
@@ -249,13 +256,17 @@ fn general_find(
         .map(|lang| {
             let mut base = base.clone();
             base.push(lang);
+            let canon_file = file.and_then(|f| canonicalize(PathBuf::from_iter([&base, f])).ok());
             let predicate = |path: &Path| {
-                let out_file = match (canonicalize(path).ok().as_ref(), file) {
+                //eprintln!("path: {:?}\nfile: {canon_file:?}", canonicalize(path).ok());
+
+                let out_file = match (canonicalize(path).ok().as_ref(), &canon_file) {
                     (_, None) => None,
                     (None, Some(_)) => panic!("can't canonacalize file"),
                     (Some(path), Some(file)) => Some(path == file),
                 };
                 match (tag, out_file) {
+                    (_, Some(false)) => None,
                     (None, Some(true)) => Some(FileSearchResult {
                         file: path.to_owned(),
                         line: None,
@@ -266,7 +277,6 @@ fn general_find(
                             line: Some(n),
                         })
                     }
-                    (None, Some(false)) => None,
                     (None, None) => panic!("no file or tag find given"),
                 }
             };
@@ -295,11 +305,28 @@ pub fn append(config: AppendConfig) -> Result<(), Error> {
     let language_texts = gen_language_text(&text, &config.src_tag)?;
 
     // extract languages
-    let sup = language_texts.iter().unzip();
+    let languages: Vec<&str> = language_texts
+        .iter()
+        .map(|(lang, _)| lang.as_ref())
+        .collect();
 
-    //// find general (file and / or needle)
-    //let path_per_lang = general_find(config.base_path, &languages, None, Some(&config.tag.needle));
+    // find general (file and / or needle)
+    let path_per_lang = general_find(config.base_path, &languages, Some(&config.file), None);
 
+    // additional post processing
+    let path_per_lang = path_per_lang
+        .into_iter()
+        .map(|(lang, result)| Ok((lang, result?)))
+        .collect::<Result<Vec<(String, FileSearchResult)>, Error>>()?;
+
+    // action appand
+    for (lang, search_find) in path_per_lang {
+        if config.verbose {
+            eprintln!("appending to file: {:?}", &search_find.file);
+        }
+        let replacement_text = find_match(&lang, &language_texts).ok_or(Error::LangNoFound)?;
+        append_to_file(&search_find.file, replacement_text)?;
+    }
     Ok(())
 }
 
@@ -311,7 +338,12 @@ pub fn remove(config: RemoveConfig) -> Result<(), Error> {
     let languages: Vec<&str> = config.languages.split(",").collect();
 
     // find general (file and / or needle)
-    let path_per_lang = general_find(config.base_path, &languages, None, Some(&config.tag.needle));
+    let path_per_lang = general_find(
+        config.base_path,
+        &languages,
+        config.tag.file.as_deref(),
+        Some(&config.tag.needle),
+    );
 
     // additional post processing
     let path_per_lang = path_per_lang

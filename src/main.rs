@@ -27,8 +27,14 @@ fn build_translate_command() -> Command {
             arg!([text] "text to be tranlated\nadd '-' when passing through stdin")
                 .required_unless_present("input_file"),
         )
-        .arg(arg!(output_file: -o --output <FILE> "path to output file"))
-        .arg(arg!(input_file: -i --input <FILE> "path to input file"))
+        .arg(
+            arg!(output_file: -o --output <FILE> "path to output file")
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(
+            arg!(input_file: -i --input <FILE> "path to input file")
+                .value_parser(value_parser!(PathBuf)),
+        )
         .arg(
             arg!(--host <ADDR> "the address of the server running the llm")
                 .env("B3_HOST")
@@ -51,12 +57,17 @@ fn build_translate_command() -> Command {
         )
 }
 fn build_lang_command() -> Command {
-    let new_var = Arg::new("new_var").help("the variable name the language tags will get");
+    let src_tag = arg!([source_tag] "tag name of the created language binding");
     let dest_tag = arg!([destination_tag] "tag to be searched for");
-    let input_file = arg!(input_file: -i --input <FILE> "path to input file");
-    let _output_file = arg!(output_file: -o --output <FILE> "path to output file");
+    let input_file = arg!(input_file: -i --input <FILE> "path to input file")
+        .value_parser(value_parser!(PathBuf));
+    let _output_file = arg!(output_file: -o --output <FILE> "path to output file")
+        .value_parser(value_parser!(PathBuf));
     let search_file =
-        arg!(search_file: -f --file <FILE> "path to file (per language) to specify seach.");
+        arg!(search_file: -f --file <FILE> "path to file (per language) to specify search.")
+            .value_parser(value_parser!(PathBuf));
+    let text = arg!([text] "tranlations to be parsed to chosen location")
+        .required_unless_present("input_file");
 
     Command::new("lang")
         .about("transfers language translations to their respective files")
@@ -67,14 +78,20 @@ fn build_lang_command() -> Command {
                 .global(true)
                 .value_parser(value_parser!(PathBuf))
         )
-        .arg(&new_var)
-        .arg(input_file)
+        .arg(&src_tag)
         .arg(&search_file)
         .arg(
             Arg::new("prepend_var")
                 .short('p')
                 .long("prepend")
                 .help("the translations will be inserted the line before the variable"),
+        )
+        .subcommand(Command::new("append")
+            .about("append the translations to the chosen file")
+            .arg(src_tag.clone().required(true))
+            .arg(&text)
+            .arg(&input_file)
+            .arg(search_file.clone().required(true))
         )
         .subcommand(Command::new("remove")
             .about("deletes the variable of the file it appears in\nonly one line variables supported\nonly deletes first appearance")
@@ -108,7 +125,7 @@ impl ToConfig<translate::Config> for ArgMatches {
         let input = if let Some(text) = self.get_one::<String>("text") {
             beetree::Input::Text(text.to_string())
         } else {
-            let file = self.get_one::<String>("input_file").expect("clap handles");
+            let file = self.get_one::<String>("input_file").expect("required");
             let file = PathBuf::from(file);
             beetree::Input::File(file)
         };
@@ -187,15 +204,38 @@ impl ToConfig<lang::RemoveConfig> for ArgMatches {
         })
     }
 }
-fn get_terminal_pipe_input(
-    cmd: &mut Command,
-    args: &ArgMatches,
-    arg_id: &str,
-) -> anyhow::Result<String> {
-    let input = args
-        .get_one::<String>(arg_id)
-        .ok_or(anyhow::anyhow!("arg id {arg_id} not present"))?;
-    let text = if input == "-" {
+impl ToConfig<lang::AppendConfig> for ArgMatches {
+    type Error = anyhow::Error;
+    fn to_config(&self) -> Result<lang::AppendConfig, Self::Error> {
+        let base_path = self
+            .get_one::<PathBuf>("base_path")
+            .expect("default")
+            .to_owned();
+        let src_tag = self
+            .get_one::<String>("source_tag")
+            .expect("required")
+            .to_owned();
+        let file = self
+            .get_one::<PathBuf>("search_file")
+            .expect("required")
+            .to_owned();
+        let input = if let Some(text) = self.get_one::<String>("text") {
+            beetree::Input::Text(text.to_string())
+        } else {
+            let file = self.get_one::<PathBuf>("input_file").expect("required");
+            beetree::Input::File(file.to_owned())
+        };
+        Ok(lang::AppendConfig {
+            base_path,
+            src_tag,
+            verbose: self.get_flag("verbose"),
+            file,
+            input,
+        })
+    }
+}
+fn get_terminal_pipe_input(cmd: &mut Command, arg_id: &str, text: String) -> String {
+    if text == "-" {
         if !std::io::stdin().is_terminal() {
             std::io::read_to_string(std::io::stdin()).unwrap()
         } else {
@@ -206,9 +246,8 @@ fn get_terminal_pipe_input(
             .exit();
         }
     } else {
-        input.to_string()
-    };
-    Ok(text)
+        text
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -217,25 +256,33 @@ fn main() -> anyhow::Result<()> {
     let matches = cmd.get_matches_mut();
     match matches.subcommand() {
         Some(("translate", args)) => {
+            let cmd = cmd.find_subcommand_mut("translate").expect("curr scmd");
             let mut config: translate::Config = args.to_config()?;
-            if let None = args.get_one::<String>("input_file") {
-                let text = get_terminal_pipe_input(
-                    &mut cmd.find_subcommand_mut("translate").expect("is subcommand"),
-                    args,
-                    "text",
-                )
-                .expect("required");
+            if let Input::Text(text) = config.input {
+                let text = get_terminal_pipe_input(cmd, "text", text);
                 config.input = Input::Text(text);
             }
             translate::run(config)?;
         }
-        Some(("lang", args)) => match args.subcommand() {
-            Some(("remove", args)) => {
-                let config: lang::RemoveConfig = args.to_config()?;
-                lang::remove(config)?;
+        Some(("lang", args)) => {
+            let cmd = cmd.find_subcommand_mut("lang").expect("curr scmd");
+            match args.subcommand() {
+                Some(("remove", args)) => {
+                    let config: lang::RemoveConfig = args.to_config()?;
+                    lang::remove(config)?;
+                }
+                Some(("append", args)) => {
+                    let cmd = cmd.find_subcommand_mut("append").expect("curr scmd");
+                    let mut config: lang::AppendConfig = args.to_config()?;
+                    if let Input::Text(text) = config.input {
+                        let text = get_terminal_pipe_input(cmd, "text", text);
+                        config.input = Input::Text(text);
+                    }
+                    lang::append(config)?;
+                }
+                _ => todo!(),
             }
-            _ => todo!(),
-        },
+        }
         Some((subcommand, _)) => panic!("clap handles invaled subommand: {subcommand:?}"),
         None => {}
     }
