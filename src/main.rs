@@ -45,6 +45,11 @@ fn build_translate_command() -> Command {
                 .env("B3_MODEL")
                 .required(true),
         )
+        .arg(
+            arg!(--languages <LANGS> "list of the languages to translate to")
+                .env("B3_LANGUAGES")
+                .default_value("nl,fr,en"),
+        )
 }
 fn build_lang_command() -> Command {
     let group = ArgGroup::new("actions").args(["prepend_var"]);
@@ -55,9 +60,9 @@ fn build_lang_command() -> Command {
         .long("input")
         .help("path to input file");
     let search_file = Arg::new("search_file")
-                .short('f')
-                .long("file")
-                .help("path to file (per language) to specify seach.\nwill append to this file if no actions flags included");
+        .short('f')
+        .long("file")
+        .help("path to file (per language) to specify seach.\nwill append to this file if no actions flags included");
 
     Command::new("lang")
         .about("transfers language translations to their respective files")
@@ -116,9 +121,14 @@ impl ToConfig<translate::Config> for ArgMatches {
             beetree::Input::File(file)
         };
         let verbose = self.get_flag("verbose");
+        let languages = self
+            .get_one::<String>("languages")
+            .expect("required")
+            .to_string();
         Ok(translate::Config {
             api_key,
             model,
+            languages,
             host,
             input,
             output_file,

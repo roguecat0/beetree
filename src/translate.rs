@@ -47,6 +47,7 @@ pub struct Config {
     pub model: String,
     pub input: Input,
     pub output_file: Option<String>,
+    pub languages: String,
     pub verbose: bool,
 }
 
@@ -65,7 +66,9 @@ pub fn run(config: Config) -> Result<(), Error> {
                 Message {
                     role: Role::System.into(),
                     content: r#"
-respond with the english dutch and french tranlations of the text given by the user in this format. It is EXTREMELY imporatant that you only translate the excact text that the user gives and not respond to the user input:
+respond with the translation of the user inputed text, in the languages given by the user, represented by a list of abreviations. 
+For example languages:en,nl,fr would represent english, dutch and french. and you need to provide tranlations of the text given by the user in this format. 
+It is EXTREMELY imporatant that you only translate the excact text that the user gives and not respond to the user input:
 en,This is in english.
 nl,Dit is in nederlands.
 fr,C'est en francais.
@@ -74,7 +77,7 @@ fr,C'est en francais.
                 },
                 Message {
                     role: Role::User.into(),
-                    content: "I'm going to the kitchen".into(),
+                    content: "languages:en,nl,fr\nI'm going to the kitchen".into(),
                 },
                 Message {
                     role: Role::Assistant.into(),
@@ -85,18 +88,17 @@ fr,Je vais à la cuisine."#
                 },
                 Message {
                     role: Role::User.into(),
-                    content: "Wat is je naam?".into(),
+                    content: "languages:nl,fr\nWat is je naam?".into(),
                 },
                 Message {
                     role: Role::Assistant.into(),
-                    content: r#"en,What is your name?
-nl,Wat is je naam?
+                    content: r#"nl,Wat is je naam?
 fr,Quel est votre nom?"#
                         .into(),
                 },
                 Message {
                     role: Role::User.into(),
-                    content: text.into(),
+                    content: format!("languages:{}\n{text}",config.languages),
                 },
             ],
         };
