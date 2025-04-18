@@ -2,6 +2,7 @@ use crate::file_handling;
 use std::fs::{self, canonicalize};
 use std::io;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 
 #[derive(Debug)]
 pub struct Config {
@@ -17,16 +18,50 @@ pub struct FindSpecified {
     pub needle: String,
     pub file: Option<PathBuf>,
 }
+
+#[derive(Debug)]
+struct FileSearchResult {
+    file: PathBuf,
+    line: Option<usize>,
+}
+
 #[derive(Debug)]
 pub enum Action {
     Append(PathBuf),
     PrependFile(FindSpecified),
     Delete(FindSpecified),
 }
+#[derive(Debug)]
+pub struct RemoveConfig {
+    pub verbose: bool,
+    pub base_path: PathBuf,
+    pub tag: FindSpecified,
+    pub languages: String,
+    pub yes: bool,
+}
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error(transparent)]
+    FileError(#[from] file_handling::Error),
+    #[error(transparent)]
+    Reqwest(#[from] reqwest::Error),
+    #[error(transparent)]
+    Serde(#[from] serde_json::Error),
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(
+        "no matching file+tag for => base: {base}, lang: {language}, file: {file:?}, tag: {tag:?}"
+    )]
+    TagSearchFailed {
+        base: PathBuf,
+        tag: Option<String>,
+        file: Option<PathBuf>,
+        language: String,
+    },
+}
 type MyError = &'static str;
 // todo: add replace (one line support)
 // todo: add specify option
-// todo: add remove (one line support)
 pub fn run(config: Config) -> Result<(), MyError> {
     let config = if config.verbose { dbg!(config) } else { config };
     let text = if let Some(text) = config.text {
@@ -187,10 +222,87 @@ where
         .map(|lang| {
             let mut base = base.clone();
             base.push(lang);
-            println!("{base:?}");
-            // not very efficient if lang part is calculation heavy
             let predicate = |path: &Path| predicate(path, lang);
             (lang.to_string(), file_handling::find_file(base, &predicate))
         })
         .collect()
 }
+
+fn general_find(
+    base: impl AsRef<Path>,
+    langs: &[String],
+    file: Option<&Path>,
+    tag: Option<&str>,
+) -> Vec<(String, Result<FileSearchResult, Error>)> {
+    let base = base.as_ref().to_owned();
+    langs
+        .iter()
+        .map(|lang| {
+            let mut base = base.clone();
+            base.push(lang);
+            let predicate = |path: &Path| {
+                let out_file = match (canonicalize(path).ok().as_ref(), file) {
+                    (_, None) => None,
+                    (None, Some(_)) => panic!("can't canonacalize file"),
+                    (Some(path), Some(file)) => Some(path == file),
+                };
+                match (tag, out_file) {
+                    (None, Some(true)) => Some(FileSearchResult {
+                        file: path.to_owned(),
+                        line: None,
+                    }),
+                    (Some(tag), _) => {
+                        find_line_occurance_in_file(path, tag).map(|n| FileSearchResult {
+                            file: path.to_owned(),
+                            line: Some(n),
+                        })
+                    }
+                    (None, Some(false)) => None,
+                    (None, None) => panic!("no file or tag find given"),
+                }
+            };
+            (
+                lang.to_string(),
+                file_handling::find_file(&base, &predicate).ok_or(Error::TagSearchFailed {
+                    base,
+                    tag: tag.map(ToOwned::to_owned),
+                    file: file.map(ToOwned::to_owned),
+                    language: lang.to_owned(),
+                }),
+            )
+        })
+        .collect()
+}
+
+pub fn remove(config: RemoveConfig) -> Result<(), Error> {
+    if config.verbose {
+        dbg!(&config);
+    }
+    // extract languages
+    let languages: Vec<String> = config.languages.split(",").map(|s| s.to_owned()).collect();
+
+    // find general (file and / or needle)
+    let path_per_lang = general_find(config.base_path, &languages, None, Some(&config.tag.needle));
+
+    // additional post processing
+    let path_per_lang = path_per_lang
+        .into_iter()
+        .map(|(lang, result)| Ok((lang, result?)))
+        .collect::<Result<Vec<(String, FileSearchResult)>, Error>>()?;
+
+    // action remove
+    for (_, search_find) in path_per_lang {
+        let index = search_find.line.expect("general_find with needle");
+        if config.verbose {
+            eprintln!("removing line: {index} from file: {:?}", &search_find.file);
+        }
+
+        delete_line(&search_find.file, index)?
+    }
+    Ok(())
+}
+// general flow
+// extract languages
+// find file
+// find needle
+// append / replace / remove / insert
