@@ -25,7 +25,6 @@ fn build_translate_command() -> Command {
     Command::new("translate")
         .about("translates input to (en,nl,fr)\n")
         .arg_required_else_help(true)
-        .subcommand_required(true)
         .arg(
             arg!([text] "text to be tranlated\nadd '-' when passing through stdin")
                 .required_unless_present("input_file"),

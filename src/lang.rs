@@ -74,9 +74,9 @@ pub enum Error {
         file: Option<PathBuf>,
         language: String,
     },
-    #[error("something")]
+    #[error("no separator")]
     NoSeparator,
-    #[error("something else")]
+    #[error("lang not found")]
     LangNoFound,
 }
 type MyError = &'static str;
