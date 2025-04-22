@@ -24,11 +24,11 @@ impl ToConfig<translate::Config> for ArgMatches {
             .get_one::<String>("host")
             .expect("required")
             .to_string();
-        let output_file = self.get_one::<String>("output_file").cloned();
+        let output_file = self.get_one::<PathBuf>("output_file").cloned();
         let input = if let Some(text) = self.get_one::<String>("text") {
             beetree::Input::Text(text.to_string())
         } else {
-            let file = self.get_one::<String>("input_file").expect("required");
+            let file = self.get_one::<PathBuf>("input_file").expect("required");
             let file = PathBuf::from(file);
             beetree::Input::File(file)
         };
@@ -51,7 +51,7 @@ impl ToConfig<translate::Config> for ArgMatches {
 impl ToConfig<lang::Config> for ArgMatches {
     type Error = &'static str;
     fn to_config(&self) -> Result<lang::Config, Self::Error> {
-        let search_file = self.get_one::<String>("search_file").map(Into::into);
+        let search_file = self.get_one::<PathBuf>("search_file").map(Into::into);
         let action = if let Some(needle) = self.get_one::<String>("prepend_var") {
             Action::PrependFile(FindSpecified {
                 needle: needle.to_string(),
@@ -62,7 +62,7 @@ impl ToConfig<lang::Config> for ArgMatches {
         };
         Ok(lang::Config {
             text: self.get_one::<String>("text").cloned(),
-            input_file: self.get_one::<String>("input_file").map(|s| s.into()),
+            input_file: self.get_one::<PathBuf>("input_file").map(|s| s.into()),
             action,
             base_path: self
                 .get_one::<String>("base_path")

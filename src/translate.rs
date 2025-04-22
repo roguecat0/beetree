@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::{file_handling, Input};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Serialize;
@@ -46,7 +48,7 @@ pub struct Config {
     pub api_key: String,
     pub model: String,
     pub input: Input,
-    pub output_file: Option<String>,
+    pub output_file: Option<PathBuf>,
     pub languages: String,
     pub verbose: bool,
 }
