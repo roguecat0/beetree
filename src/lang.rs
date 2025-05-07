@@ -40,6 +40,13 @@ pub struct RemoveConfig {
     pub yes: bool,
 }
 #[derive(Debug)]
+pub struct FindConfig {
+    pub verbose: bool,
+    pub base_path: PathBuf,
+    pub dst_tag: FindSpecified,
+    pub languages: String,
+}
+#[derive(Debug)]
 pub struct AppendConfig {
     pub verbose: bool,
     pub base_path: PathBuf,
@@ -231,6 +238,15 @@ fn delete_line(path: impl AsRef<Path>, index: usize) -> io::Result<()> {
     fs::write(&path, &s)?;
     Ok(())
 }
+fn print_line(path: impl AsRef<Path>, index: usize) -> io::Result<()> {
+    let s: String = fs::read_to_string(&path)?;
+    for (i, line) in s.lines().enumerate() {
+        if i == index {
+            println!("{index}: {line}");
+        }
+    }
+    Ok(())
+}
 pub fn language_base_find_file<F, T>(
     base: impl AsRef<Path>,
     langs: &[String],
@@ -366,6 +382,36 @@ pub fn remove(config: RemoveConfig) -> Result<(), Error> {
         }
 
         delete_line(&search_find.file, index)?
+    }
+    Ok(())
+}
+pub fn find(config: FindConfig) -> Result<(), Error> {
+    if config.verbose {
+        dbg!(&config);
+    }
+    // extract languages
+    let languages: Vec<&str> = config.languages.split(",").collect();
+
+    // find general (file and / or needle)
+    let path_per_lang = general_find(
+        config.base_path,
+        &languages,
+        config.dst_tag.file.as_deref(),
+        Some(&config.dst_tag.needle),
+    );
+
+    // additional post processing
+    let path_per_lang = path_per_lang
+        .into_iter()
+        .map(|(lang, result)| Ok((lang, result?)))
+        .collect::<Result<Vec<(String, FileSearchResult)>, Error>>()?;
+
+    // action remove
+    for (lang, search_find) in path_per_lang {
+        let index = search_find.line.expect("general_find with needle");
+        eprintln!("lang: {lang}, path: {}", search_find.file.to_str().unwrap());
+        print_line(&search_find.file, index)?;
+        eprintln!("");
     }
     Ok(())
 }

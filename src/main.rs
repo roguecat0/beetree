@@ -82,20 +82,20 @@ fn build_lang_command() -> Command {
                 .global(true)
                 .value_parser(value_parser!(PathBuf))
         )
-        .arg(&src_tag)
-        .arg(&search_file)
-        .arg(
-            Arg::new("prepend_var")
-                .short('p')
-                .long("prepend")
-                .help("the translations will be inserted the line before the variable"),
-        )
         .subcommand(Command::new("append")
             .about("append the translations to the chosen file")
             .arg(src_tag.clone().required(true))
             .arg(&text)
             .arg(&input_file)
             .arg(search_file.clone().required(true))
+        )
+        .subcommand(Command::new("find")
+            .about("looks for the tags")
+            .arg(&search_file)
+            .arg(arg!(--languages <LANGS> "list of the languages to translate to")
+                .env("B3_LANGUAGES")
+                .default_value("nl,fr,en"))
+            .arg(dest_tag.clone().required(true))
         )
         .subcommand(Command::new("insert")
             .about("inserts the translations before the destination tag")
@@ -150,6 +150,10 @@ fn main() -> anyhow::Result<()> {
                 Some(("remove", args)) => {
                     let config: lang::RemoveConfig = args.to_config()?;
                     lang::remove(config)?;
+                }
+                Some(("find", args)) => {
+                    let config: lang::FindConfig = args.to_config()?;
+                    lang::find(config)?;
                 }
                 Some(("append", args)) => {
                     let cmd = cmd.find_subcommand_mut("append").expect("curr scmd");

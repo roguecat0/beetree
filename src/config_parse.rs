@@ -107,6 +107,36 @@ impl ToConfig<lang::RemoveConfig> for ArgMatches {
         })
     }
 }
+impl ToConfig<lang::FindConfig> for ArgMatches {
+    type Error = anyhow::Error;
+    fn to_config(&self) -> Result<lang::FindConfig, Self::Error> {
+        let languages = self
+            .get_one::<String>("languages")
+            .expect("default")
+            .to_owned();
+        let base_path = self
+            .get_one::<PathBuf>("base_path")
+            .expect("default")
+            .to_owned();
+        let destination_tag = self
+            .get_one::<String>("destination_tag")
+            .expect("required")
+            .to_owned();
+        let file = self
+            .get_one::<PathBuf>("search_file")
+            .map(ToOwned::to_owned);
+        let dst_tag = FindSpecified {
+            needle: destination_tag,
+            file,
+        };
+        Ok(lang::FindConfig {
+            languages,
+            base_path,
+            dst_tag,
+            verbose: self.get_flag("verbose"),
+        })
+    }
+}
 impl ToConfig<lang::AppendConfig> for ArgMatches {
     type Error = anyhow::Error;
     fn to_config(&self) -> Result<lang::AppendConfig, Self::Error> {
